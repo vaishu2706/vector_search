@@ -3,26 +3,30 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>FAQ Chatbot</title>
+  <title>RAG Knowledge Chatbot</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg: #0d0d1a;
-      --surface: #13132b;
-      --border: #252545;
-      --accent: #7c3aed;
-      --accent2: #3b82f6;
-      --text: #e2e2f0;
-      --muted: #7070a0;
-      --user-bg: #1e1b4b;
-      --bot-bg: #131330;
-      --success: #22c55e;
-      --error: #f87171;
+      --bg:        #0a0a14;
+      --surface:   #11111f;
+      --surface2:  #17172a;
+      --border:    #22223a;
+      --accent:    #7c3aed;
+      --accent2:   #3b82f6;
+      --accent-g:  linear-gradient(135deg, #7c3aed, #3b82f6);
+      --text:      #e2e2f0;
+      --muted:     #6060a0;
+      --user-bg:   #1e1b4b;
+      --bot-bg:    #12122a;
+      --success:   #22c55e;
+      --warning:   #f59e0b;
+      --error:     #f87171;
+      --tag-bg:    #1a1040;
     }
 
     body {
-      font-family: 'Segoe UI', sans-serif;
+      font-family: 'Segoe UI', system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
       height: 100vh;
@@ -31,175 +35,308 @@
       overflow: hidden;
     }
 
-    /* ── Top bar ── */
+    /* ── Top bar ─────────────────────────────────────────────────────────── */
     .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 24px;
+      padding: 12px 24px;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      flex-shrink: 0;
+      gap: 12px;
+    }
+
+    .topbar-left { display: flex; align-items: center; gap: 10px; }
+
+    .logo {
+      width: 34px; height: 34px;
+      background: var(--accent-g);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem;
       flex-shrink: 0;
     }
 
     .topbar h1 {
-      font-size: 1.15rem;
-      background: linear-gradient(90deg, #a78bfa, #60a5fa);
+      font-size: 1rem;
+      font-weight: 600;
+      background: var(--accent-g);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .stats-bar {
-      display: flex;
-      gap: 16px;
-      font-size: 0.75rem;
+    .topbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .stat-pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.72rem;
       color: var(--muted);
+      white-space: nowrap;
     }
 
-    .stats-bar span b { color: #a78bfa; }
+    .stat-pill b { color: #a78bfa; }
 
-    /* ── Layout ── */
+    .pill-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    .pill-dot.active { background: var(--success); }
+
+    /* ── Layout ──────────────────────────────────────────────────────────── */
     .layout {
       display: flex;
       flex: 1;
       overflow: hidden;
     }
 
-    /* ── Sidebar ── */
+    /* ── Sidebar ─────────────────────────────────────────────────────────── */
     .sidebar {
-      width: 300px;
+      width: 290px;
       border-right: 1px solid var(--border);
       background: var(--surface);
       display: flex;
       flex-direction: column;
-      padding: 20px 16px;
-      gap: 16px;
       flex-shrink: 0;
       overflow-y: auto;
     }
 
-    .sidebar h2 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .sidebar-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
 
+    .section-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 10px;
+    }
+
+    /* Upload zone */
     .upload-zone {
       border: 2px dashed var(--border);
       border-radius: 10px;
-      padding: 20px;
+      padding: 18px 12px;
       text-align: center;
       cursor: pointer;
       transition: border-color 0.2s, background 0.2s;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: var(--muted);
     }
 
-    .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); background: #1a1040; color: var(--text); }
-    .upload-zone input { display: none; }
-    .upload-zone .icon { font-size: 1.8rem; margin-bottom: 6px; }
+    .upload-zone:hover, .upload-zone.drag {
+      border-color: var(--accent);
+      background: rgba(124,58,237,0.07);
+      color: var(--text);
+    }
 
+    .upload-zone input { display: none; }
+    .upload-zone .uz-icon { font-size: 1.6rem; margin-bottom: 6px; }
+    .upload-zone .uz-hint { font-size: 0.7rem; margin-top: 4px; opacity: 0.6; }
+
+    /* Paste area */
     textarea#pasteText {
       width: 100%;
-      height: 110px;
+      height: 90px;
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       color: var(--text);
       font-size: 0.82rem;
-      padding: 10px;
+      padding: 9px 11px;
       resize: vertical;
       outline: none;
       font-family: inherit;
+      line-height: 1.5;
     }
 
     textarea#pasteText:focus { border-color: var(--accent); }
 
+    /* Buttons */
     .btn {
       width: 100%;
-      padding: 10px;
+      padding: 9px 12px;
       border-radius: 8px;
       border: none;
-      font-size: 0.88rem;
+      font-size: 0.84rem;
+      font-weight: 500;
       cursor: pointer;
-      transition: opacity 0.2s;
+      transition: opacity 0.2s, transform 0.1s;
+      margin-top: 8px;
     }
 
-    .btn:hover { opacity: 0.85; }
-    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
-    .btn-danger  { background: #3b1f1f; color: var(--error); border: 1px solid #5a2020; }
+    .btn:hover  { opacity: 0.88; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent-g); color: #fff; }
+    .btn-danger  { background: #1f1010; color: var(--error); border: 1px solid #3a1515; }
 
+    /* Status */
     #uploadStatus {
-      font-size: 0.8rem;
-      min-height: 18px;
+      font-size: 0.76rem;
+      min-height: 16px;
+      margin-top: 8px;
       text-align: center;
     }
 
-    .status-ok  { color: var(--success); }
-    .status-err { color: var(--error); }
+    .ok  { color: var(--success); }
+    .err { color: var(--error); }
+    .inf { color: var(--warning); }
 
-    .file-list { display: flex; flex-direction: column; gap: 6px; }
+    /* File tags */
+    .file-list { display: flex; flex-direction: column; gap: 5px; }
 
     .file-tag {
-      background: #1a1040;
+      background: var(--tag-bg);
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 6px 10px;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       color: #a78bfa;
       display: flex;
       align-items: center;
       gap: 6px;
+      word-break: break-all;
     }
 
-    /* ── Chat area ── */
+    /* Pipeline stats */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .p-stat {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 0.72rem;
+    }
+
+    .p-stat .p-label { color: var(--muted); margin-bottom: 2px; }
+    .p-stat .p-val   { color: #a78bfa; font-weight: 600; font-size: 0.82rem; }
+
+    /* ── Chat area ───────────────────────────────────────────────────────── */
     .chat-area {
       flex: 1;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      position: relative;
     }
 
     .messages {
       flex: 1;
       overflow-y: auto;
-      padding: 24px 28px;
+      padding: 20px 24px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
+      scroll-behavior: smooth;
     }
 
-    .messages::-webkit-scrollbar { width: 5px; }
+    .messages::-webkit-scrollbar { width: 4px; }
     .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-    .msg { display: flex; gap: 10px; max-width: 80%; animation: fadeUp 0.25s ease; }
+    /* Message bubbles */
+    .msg {
+      display: flex;
+      gap: 10px;
+      max-width: 78%;
+      animation: fadeUp 0.22s ease;
+    }
+
     .msg.user { align-self: flex-end; flex-direction: row-reverse; }
     .msg.bot  { align-self: flex-start; }
 
     .avatar {
-      width: 32px; height: 32px;
+      width: 30px; height: 30px;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       flex-shrink: 0;
+      margin-top: 2px;
     }
 
-    .msg.user .avatar { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
-    .msg.bot  .avatar { background: #1e1b4b; border: 1px solid var(--border); }
+    .msg.user .avatar { background: var(--accent-g); }
+    .msg.bot  .avatar { background: var(--surface2); border: 1px solid var(--border); }
+
+    .bubble-wrap { display: flex; flex-direction: column; gap: 4px; }
 
     .bubble {
-      padding: 12px 16px;
+      padding: 11px 15px;
       border-radius: 14px;
-      font-size: 0.9rem;
-      line-height: 1.65;
+      font-size: 0.88rem;
+      line-height: 1.7;
       white-space: pre-wrap;
       word-break: break-word;
     }
 
-    .msg.user .bubble { background: var(--user-bg); border-bottom-right-radius: 4px; }
-    .msg.bot  .bubble { background: var(--bot-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+    .msg.user .bubble {
+      background: var(--user-bg);
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.bot .bubble {
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
 
     .typing .bubble { color: var(--muted); font-style: italic; }
 
-    /* ── Input bar ── */
+    /* Sources toggle */
+    .sources-toggle {
+      font-size: 0.7rem;
+      color: var(--muted);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 0;
+      user-select: none;
+      width: fit-content;
+    }
+
+    .sources-toggle:hover { color: #a78bfa; }
+
+    .sources-drawer {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.6;
+      display: none;
+      gap: 8px;
+      flex-direction: column;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .sources-drawer.open { display: flex; }
+
+    .source-chunk {
+      border-left: 2px solid var(--accent);
+      padding-left: 8px;
+      color: #b0b0d0;
+    }
+
+    /* ── Input bar ───────────────────────────────────────────────────────── */
     .input-bar {
-      padding: 16px 24px;
+      padding: 14px 20px;
       border-top: 1px solid var(--border);
       background: var(--surface);
       display: flex;
@@ -213,34 +350,37 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       color: var(--text);
-      font-size: 0.92rem;
-      padding: 12px 14px;
+      font-size: 0.9rem;
+      padding: 11px 14px;
       resize: none;
       outline: none;
       font-family: inherit;
       max-height: 120px;
       overflow-y: auto;
       line-height: 1.5;
+      transition: border-color 0.2s;
     }
 
     .input-bar textarea:focus { border-color: var(--accent); }
 
     .send-btn {
-      width: 44px; height: 44px;
+      width: 42px; height: 42px;
       border-radius: 10px;
       border: none;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background: var(--accent-g);
       color: #fff;
-      font-size: 1.1rem;
+      font-size: 1rem;
       cursor: pointer;
       flex-shrink: 0;
-      transition: opacity 0.2s;
+      transition: opacity 0.2s, transform 0.1s;
+      display: flex; align-items: center; justify-content: center;
     }
 
-    .send-btn:hover { opacity: 0.85; }
-    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .send-btn:hover  { opacity: 0.85; }
+    .send-btn:active { transform: scale(0.95); }
+    .send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    /* ── Empty state ── */
+    /* ── Empty state ─────────────────────────────────────────────────────── */
     .empty-state {
       flex: 1;
       display: flex;
@@ -248,22 +388,53 @@
       align-items: center;
       justify-content: center;
       color: var(--muted);
-      gap: 10px;
-      font-size: 0.9rem;
+      gap: 12px;
+      font-size: 0.88rem;
       text-align: center;
-      padding: 20px;
+      padding: 24px;
     }
 
-    .empty-state .big { font-size: 2.5rem; }
+    .empty-state .big { font-size: 2.8rem; }
+
+    .empty-hints {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .hint-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .hint-chip:hover { border-color: var(--accent); color: #a78bfa; }
+
+    /* ── Progress bar ────────────────────────────────────────────────────── */
+    .progress-bar {
+      height: 2px;
+      background: var(--accent-g);
+      width: 0%;
+      transition: width 0.3s;
+      position: absolute;
+      top: 0; left: 0;
+    }
 
     @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(10px); }
+      from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
     }
 
-    /* ── Responsive ── */
-    @media (max-width: 640px) {
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 700px) {
       .sidebar { display: none; }
+      .topbar-right .stat-pill:not(:first-child) { display: none; }
     }
   </style>
 </head>
@@ -271,63 +442,126 @@
 
 <!-- Top bar -->
 <div class="topbar">
-  <h1>🤖 FAQ Knowledge Chatbot</h1>
-  <div class="stats-bar">
-    <span>Chunks: <b id="statChunks">0</b></span>
-    <span>Turns: <b id="statTurns">0</b></span>
-    <span>Model: <b id="statModel">—</b></span>
+  <div class="topbar-left">
+    <div class="logo">🧠</div>
+    <h1>RAG Knowledge Chatbot</h1>
+  </div>
+  <div class="topbar-right">
+    <div class="stat-pill">
+      <span class="pill-dot" id="dotIndexed"></span>
+      Chunks: <b id="statChunks">0</b>
+    </div>
+    <div class="stat-pill">Turns: <b id="statTurns">0</b></div>
+    <div class="stat-pill">Top-K: <b id="statTopK">—</b></div>
+    <div class="stat-pill">Model: <b id="statModel">—</b></div>
   </div>
 </div>
 
 <div class="layout">
 
-  <!-- Sidebar: upload -->
+  <!-- Sidebar -->
   <aside class="sidebar">
-    <h2>📂 Knowledge Base</h2>
 
-    <!-- File drop zone -->
-    <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-      <div class="icon">📄</div>
-      <div>Drop or click to upload</div>
-      <div style="font-size:0.75rem;margin-top:4px">.txt · .md · .pdf</div>
-      <input type="file" id="fileInput" accept=".txt,.md,.pdf" multiple/>
+    <!-- Upload -->
+    <div class="sidebar-section">
+      <div class="section-label">📂 Knowledge Base</div>
+      <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <div class="uz-icon">📄</div>
+        <div>Drop files or click to upload</div>
+        <div class="uz-hint">.txt &nbsp;·&nbsp; .md &nbsp;·&nbsp; .pdf &nbsp;·&nbsp; max 10 MB</div>
+        <input type="file" id="fileInput" accept=".txt,.md,.pdf" multiple/>
+      </div>
+      <div class="file-list" id="fileList" style="margin-top:10px"></div>
     </div>
 
-    <!-- Paste text -->
-    <h2>✏️ Paste Text</h2>
-    <textarea id="pasteText" placeholder="Paste FAQ content, docs, or any text here…"></textarea>
-    <button class="btn btn-primary" onclick="pasteIngest()">Ingest Text</button>
+    <!-- Paste -->
+    <div class="sidebar-section">
+      <div class="section-label">✏️ Paste Text</div>
+      <textarea id="pasteText" placeholder="Paste FAQ content, docs, or any text…"></textarea>
+      <button class="btn btn-primary" onclick="pasteIngest()">⬆ Ingest Text</button>
+    </div>
 
-    <div id="uploadStatus"></div>
+    <!-- Status -->
+    <div class="sidebar-section">
+      <div id="uploadStatus"></div>
+    </div>
 
-    <!-- Uploaded files list -->
-    <div class="file-list" id="fileList"></div>
+    <!-- Pipeline stats -->
+    <div class="sidebar-section">
+      <div class="section-label">⚙️ Pipeline Config</div>
+      <div class="pipeline-grid">
+        <div class="p-stat">
+          <div class="p-label">Dense model</div>
+          <div class="p-val" id="pDense">—</div>
+        </div>
+        <div class="p-stat">
+          <div class="p-label">Reranker</div>
+          <div class="p-val" id="pRerank">—</div>
+        </div>
+        <div class="p-stat">
+          <div class="p-label">Candidates</div>
+          <div class="p-val" id="pCandidates">—</div>
+        </div>
+        <div class="p-stat">
+          <div class="p-label">Final top-K</div>
+          <div class="p-val" id="pFinal">—</div>
+        </div>
+        <div class="p-stat">
+          <div class="p-label">Dense weight</div>
+          <div class="p-val" id="pDenseW">—</div>
+        </div>
+        <div class="p-stat">
+          <div class="p-label">BM25 weight</div>
+          <div class="p-val" id="pBm25W">—</div>
+        </div>
+      </div>
+    </div>
 
     <!-- Clear -->
-    <button class="btn btn-danger" onclick="clearAll()">🗑 Clear Everything</button>
+    <div class="sidebar-section">
+      <button class="btn btn-danger" onclick="clearAll()">🗑 Clear Everything</button>
+    </div>
+
   </aside>
 
   <!-- Chat -->
   <div class="chat-area">
+    <div class="progress-bar" id="progressBar"></div>
+
     <div class="messages" id="messages">
       <div class="empty-state" id="emptyState">
         <div class="big">💬</div>
-        <div>Upload documents or paste text on the left,<br/>then ask anything about them.</div>
+        <div>Upload documents or paste text,<br/>then ask anything about them.</div>
+        <div class="empty-hints">
+          <div class="hint-chip" onclick="useHint(this)">What is this document about?</div>
+          <div class="hint-chip" onclick="useHint(this)">Summarise the key points</div>
+          <div class="hint-chip" onclick="useHint(this)">What are the main topics covered?</div>
+        </div>
       </div>
     </div>
 
     <div class="input-bar">
-      <textarea id="userInput" rows="1" placeholder="Ask a question about your documents…"
-        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+      <textarea id="userInput" rows="1"
+        placeholder="Ask a question about your documents…"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()" title="Send (Enter)">
+        &#10148;
+      </button>
     </div>
   </div>
 
 </div>
 
 <script>
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const $ = id => document.getElementById(id);
+
+  function esc(t) {
+    return String(t)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
 
   function autoResize(el) {
     el.style.height = "auto";
@@ -340,63 +574,106 @@
 
   function scrollBottom() {
     const m = $("messages");
-    m.scrollTop = m.scrollHeight;
+    requestAnimationFrame(() => m.scrollTop = m.scrollHeight);
   }
 
-  function setStatus(msg, type = "") {
-    $("uploadStatus").innerHTML = `<span class="status-${type}">${msg}</span>`;
+  function setStatus(msg, cls = "") {
+    $("uploadStatus").innerHTML = `<span class="${cls}">${msg}</span>`;
   }
 
+  function setProgress(pct) {
+    $("progressBar").style.width = pct + "%";
+    if (pct >= 100) setTimeout(() => $("progressBar").style.width = "0%", 400);
+  }
+
+  function useHint(el) {
+    $("userInput").value = el.textContent;
+    autoResize($("userInput"));
+    $("userInput").focus();
+  }
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
   function updateStats(s) {
     if (!s) return;
     $("statChunks").textContent = s.chunks;
     $("statTurns").textContent  = s.turns;
-    $("statModel").textContent  = s.model;
+    $("statModel").textContent  = (s.model || "—").split("/").pop();
+    $("statTopK").textContent   = s.top_k_final ?? "—";
+    $("dotIndexed").className   = "pill-dot" + (s.indexed ? " active" : "");
+
+    // Pipeline config panel
+    $("pDense").textContent      = (s.dense_model  || "—").split("/").pop();
+    $("pRerank").textContent     = (s.rerank_model || "—").split("/").pop();
+    $("pCandidates").textContent = s.top_k_retrieve ?? "—";
+    $("pFinal").textContent      = s.top_k_final    ?? "—";
+    if (s.hybrid_weights) {
+      $("pDenseW").textContent = s.hybrid_weights.dense;
+      $("pBm25W").textContent  = s.hybrid_weights.bm25;
+    }
   }
 
-  // ── Render messages ──────────────────────────────────────────────────────
-  function appendMsg(role, text, id = null) {
+  async function fetchStats() {
+    try { updateStats(await (await fetch("/stats")).json()); } catch {}
+  }
+
+  // ── Messages ───────────────────────────────────────────────────────────────
+  function appendMsg(role, text, sources = []) {
     $("emptyState")?.remove();
     const wrap = document.createElement("div");
     wrap.className = `msg ${role}`;
-    if (id) wrap.id = id;
+
+    const sourcesHtml = (role === "bot" && sources.length)
+      ? `<span class="sources-toggle" onclick="toggleSources(this)">
+           📎 ${sources.length} source chunk${sources.length > 1 ? "s" : ""} ▾
+         </span>
+         <div class="sources-drawer">
+           ${sources.map((s,i) => `<div class="source-chunk"><b>[${i+1}]</b> ${esc(s)}</div>`).join("")}
+         </div>`
+      : "";
+
     wrap.innerHTML = `
       <div class="avatar">${role === "user" ? "🧑" : "🤖"}</div>
-      <div class="bubble">${escHtml(text)}</div>`;
+      <div class="bubble-wrap">
+        <div class="bubble">${esc(text)}</div>
+        ${sourcesHtml}
+      </div>`;
     $("messages").appendChild(wrap);
     scrollBottom();
-    return wrap;
   }
 
-  function escHtml(t) {
-    return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  function toggleSources(el) {
+    const drawer = el.nextElementSibling;
+    drawer.classList.toggle("open");
+    el.textContent = drawer.classList.contains("open")
+      ? el.textContent.replace("▾","▴")
+      : el.textContent.replace("▴","▾");
   }
 
   function showTyping() {
     const el = document.createElement("div");
-    el.className = "msg bot typing";
-    el.id = "typing";
-    el.innerHTML = `<div class="avatar">🤖</div><div class="bubble">Thinking…</div>`;
+    el.className = "msg bot typing"; el.id = "typing";
+    el.innerHTML = `<div class="avatar">🤖</div><div class="bubble-wrap"><div class="bubble">Thinking…</div></div>`;
     $("messages").appendChild(el);
     scrollBottom();
   }
 
   function removeTyping() { $("typing")?.remove(); }
 
-  // ── Chat ─────────────────────────────────────────────────────────────────
+  // ── Chat ───────────────────────────────────────────────────────────────────
   async function sendMessage() {
-    const input = $("userInput");
+    const input   = $("userInput");
     const message = input.value.trim();
     if (!message) return;
 
-    input.value = "";
-    input.style.height = "auto";
+    input.value = ""; input.style.height = "auto";
     $("sendBtn").disabled = true;
+    setProgress(20);
 
     appendMsg("user", message);
     showTyping();
 
     try {
+      setProgress(50);
       const res  = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -404,24 +681,30 @@
       });
       const data = await res.json();
       removeTyping();
+      setProgress(100);
 
-      if (!res.ok) { appendMsg("bot", "⚠️ " + (data.error || "Server error")); }
-      else         { appendMsg("bot", data.answer); updateStats(data.stats); }
+      if (!res.ok) {
+        appendMsg("bot", "⚠️ " + (data.error || "Server error"));
+      } else {
+        appendMsg("bot", data.answer, data.sources || []);
+        updateStats(data.stats);
+      }
     } catch {
       removeTyping();
-      appendMsg("bot", "⚠️ Could not reach the server.");
+      setProgress(0);
+      appendMsg("bot", "⚠️ Could not reach the server. Is it running?");
     }
 
     $("sendBtn").disabled = false;
     input.focus();
   }
 
-  // ── Upload file ──────────────────────────────────────────────────────────
+  // ── Upload ─────────────────────────────────────────────────────────────────
   $("fileInput").addEventListener("change", () => uploadFiles($("fileInput").files));
 
   const dz = $("dropZone");
   dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("drag"); });
-  dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+  dz.addEventListener("dragleave", ()  => dz.classList.remove("drag"));
   dz.addEventListener("drop", e => {
     e.preventDefault(); dz.classList.remove("drag");
     uploadFiles(e.dataTransfer.files);
@@ -429,7 +712,7 @@
 
   async function uploadFiles(files) {
     for (const file of files) {
-      setStatus(`Uploading ${file.name}…`);
+      setStatus(`Uploading ${esc(file.name)}…`, "inf");
       const fd = new FormData();
       fd.append("file", file);
       try {
@@ -445,11 +728,11 @@
     }
   }
 
-  // ── Paste ingest ─────────────────────────────────────────────────────────
+  // ── Paste ingest ───────────────────────────────────────────────────────────
   async function pasteIngest() {
     const text = $("pasteText").value.trim();
     if (!text) { setStatus("Nothing to ingest.", "err"); return; }
-    setStatus("Ingesting…");
+    setStatus("Ingesting…", "inf");
     try {
       const res  = await fetch("/upload", {
         method: "POST",
@@ -467,33 +750,31 @@
     } catch { setStatus("Failed.", "err"); }
   }
 
-  // ── Clear ────────────────────────────────────────────────────────────────
+  // ── Clear ──────────────────────────────────────────────────────────────────
   async function clearAll() {
     if (!confirm("Clear all documents and conversation history?")) return;
     await fetch("/clear", { method: "POST" });
     $("messages").innerHTML = `
       <div class="empty-state" id="emptyState">
         <div class="big">💬</div>
-        <div>Upload documents or paste text on the left,<br/>then ask anything about them.</div>
+        <div>Upload documents or paste text,<br/>then ask anything about them.</div>
+        <div class="empty-hints">
+          <div class="hint-chip" onclick="useHint(this)">What is this document about?</div>
+          <div class="hint-chip" onclick="useHint(this)">Summarise the key points</div>
+          <div class="hint-chip" onclick="useHint(this)">What are the main topics covered?</div>
+        </div>
       </div>`;
     $("fileList").innerHTML = "";
     setStatus("Cleared.", "ok");
     fetchStats();
   }
 
-  // ── Misc ─────────────────────────────────────────────────────────────────
+  // ── Misc ───────────────────────────────────────────────────────────────────
   function addFileTag(name) {
     const tag = document.createElement("div");
     tag.className = "file-tag";
-    tag.innerHTML = `📎 ${escHtml(name)}`;
+    tag.innerHTML = `📎 ${esc(name)}`;
     $("fileList").appendChild(tag);
-  }
-
-  async function fetchStats() {
-    try {
-      const res = await fetch("/stats");
-      updateStats(await res.json());
-    } catch {}
   }
 
   fetchStats();

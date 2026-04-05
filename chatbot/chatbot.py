@@ -1,51 +1,98 @@
+"""
+chatbot.py
+----------
+Orchestrator — the single entry point used by app.py (the Flask server).
+
+This file does NOT contain chunking, retrieval, or LLM logic.
+It simply wires the three specialist modules together:
+
+  chunker.py   →  splits and deduplicates text
+  retriever.py →  finds the most relevant chunks for a query
+  llm.py       →  calls the language model and manages chat memory
+
+The in-memory knowledge base (chunks + FAISS index + BM25 index) lives here
+so that all modules share one consistent state.
+"""
+
 import os
-import re
+import logging
 import faiss
 import numpy as np
-import requests
-from sentence_transformers import SentenceTransformer
+from dataclasses import dataclass, field
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL   = os.environ.get("OPENROUTER_MODEL", "mistralai/mistral-7b-instruct")
-OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
+import chunker
+import retriever
+import llm
+import memory
+import database
 
-_embedder = SentenceTransformer("all-MiniLM-L6-v2")
+# ── Logging setup ─────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("rag.chatbot")
 
-# ── In-memory store ──────────────────────────────────────────────────────────
-_chunks: list[str] = []
-_index: faiss.IndexFlatIP | None = None
-_conversation: list[dict] = []          # [{role, content}, ...]
+
+# ── Shared Knowledge Base State ───────────────────────────────────────────────
+
+@dataclass
+class KnowledgeBase:
+    """Holds all in-memory state for the vector store and keyword index."""
+    chunks: list[str]                   = field(default_factory=list)
+    chunk_hashes: set[str]              = field(default_factory=set)
+    index: faiss.IndexFlatIP | None     = None   # FAISS dense index
+    bm25: object | None                 = None   # BM25 keyword index
+    tokenized: list[list[str]]          = field(default_factory=list)
+
+_kb = KnowledgeBase()
 
 
-# ── Document ingestion ───────────────────────────────────────────────────────
-def _split_chunks(text: str, size: int = 400, overlap: int = 80) -> list[str]:
-    """Split text into overlapping word-level chunks."""
-    words = text.split()
-    chunks, i = [], 0
-    while i < len(words):
-        chunks.append(" ".join(words[i : i + size]))
-        i += size - overlap
-    return [c for c in chunks if len(c.strip()) > 30]
+# ── Internal Helpers ──────────────────────────────────────────────────────────
 
+def _add_chunks_to_kb(new_chunks: list[str]):
+    """Embed new chunks, add them to FAISS and rebuild the BM25 index."""
+    vecs = retriever.embed(new_chunks)
+
+    if _kb.index is None:
+        _kb.index = retriever.build_faiss_index(vecs)
+    else:
+        retriever.add_to_faiss(_kb.index, vecs)
+
+    _kb.chunks.extend(new_chunks)
+    _kb.tokenized.extend(c.lower().split() for c in new_chunks)
+    _kb.bm25 = retriever.build_bm25(_kb.tokenized)
+
+    log.info("Knowledge base updated: %d total chunks", len(_kb.chunks))
+
+
+# ── Public API (called by app.py) ─────────────────────────────────────────────
 
 def ingest_text(text: str) -> int:
-    """Add raw text to the FAISS index. Returns total chunk count."""
-    global _index, _chunks
-    new_chunks = _split_chunks(text)
-    if not new_chunks:
-        return len(_chunks)
+    """
+    Chunk, deduplicate, and index raw text into the knowledge base.
+    Returns the total number of chunks currently stored.
+    """
+    raw_chunks = chunker.make_chunks(text)
+    new_chunks = chunker.deduplicate(raw_chunks, _kb.chunk_hashes)
 
-    vecs = _embed(new_chunks)
-    if _index is None:
-        _index = faiss.IndexFlatIP(vecs.shape[1])
-    _index.add(vecs)
-    _chunks.extend(new_chunks)
-    return len(_chunks)
+    if not new_chunks:
+        log.warning("No new content to ingest after deduplication")
+        return len(_kb.chunks)
+
+    _add_chunks_to_kb(new_chunks)
+    return len(_kb.chunks)
 
 
 def ingest_file(filepath: str) -> int:
-    """Parse .txt / .md / .pdf and ingest into index."""
+    """
+    Read a .txt, .md, or .pdf file and ingest its content into the knowledge base.
+    Returns the total number of chunks currently stored.
+    """
     ext = os.path.splitext(filepath)[1].lower()
+    log.info("Reading file: %s (ext=%s)", filepath, ext)
+
     if ext == ".pdf":
         try:
             import pdfplumber
@@ -56,78 +103,64 @@ def ingest_file(filepath: str) -> int:
     else:
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
+
     return ingest_text(text)
 
 
-def clear_knowledge_base():
-    global _chunks, _index, _conversation
-    _chunks, _index, _conversation = [], None, []
+def chat(session_id: str, user_message: str) -> str:
+    """
+    Full chat flow:
+      1. Retrieve relevant chunks from the knowledge base
+      2. Save user message to DB + Redis (memory.add_turn)
+      3. Call LLM — reads history from Redis (DB fallback inside memory.py)
+      4. Save assistant answer to DB + Redis
+    """
+    log.info("User query (session=%s): '%s'", session_id, user_message)
 
+    context_chunks = []
+    if _kb.index is not None and _kb.chunks:
+        context_chunks = retriever.retrieve(
+            query=user_message,
+            chunks=_kb.chunks,
+            index=_kb.index,
+            bm25=_kb.bm25,
+        )
+    else:
+        log.warning("Knowledge base is empty — answering without context")
 
-# ── Retrieval ────────────────────────────────────────────────────────────────
-def _embed(texts: list[str]) -> np.ndarray:
-    vecs = _embedder.encode(texts, convert_to_numpy=True).astype("float32")
-    faiss.normalize_L2(vecs)
-    return vecs
+    # Write user turn to DB + Redis BEFORE calling LLM
+    memory.add_turn(session_id, "user", user_message)
 
+    # LLM reads history from Redis (memory.get_history handles DB fallback)
+    answer = llm.call_llm(session_id, context_chunks, user_message)
 
-def retrieve(query: str, top_k: int = 4) -> list[str]:
-    if _index is None or len(_chunks) == 0:
-        return []
-    q = _embed([query])
-    scores, idxs = _index.search(q, min(top_k, len(_chunks)))
-    return [_chunks[i] for i, s in zip(idxs[0], scores[0]) if s > 0.25]
+    # Write assistant answer to DB + Redis AFTER LLM responds
+    memory.add_turn(session_id, "assistant", answer)
 
-
-# ── Conversation memory ──────────────────────────────────────────────────────
-def _trim_memory(max_turns: int = 6):
-    """Keep only the last N user/assistant pairs."""
-    global _conversation
-    if len(_conversation) > max_turns * 2:
-        _conversation = _conversation[-(max_turns * 2):]
-
-
-# ── LLM call via OpenRouter ──────────────────────────────────────────────────
-def _call_llm(messages: list[dict]) -> str:
-    if not OPENROUTER_API_KEY:
-        return "⚠️ OPENROUTER_API_KEY is not set. Please set it as an environment variable."
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5000",
-    }
-    payload = {"model": OPENROUTER_MODEL, "messages": messages}
-    resp = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=60)
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
-
-
-# ── Main chat function ───────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a helpful FAQ assistant. Answer the user's question using ONLY the context provided below.
-If the answer is not in the context, say "I don't have information about that in the uploaded documents."
-Be concise, clear, and friendly. Do not make up information."""
-
-
-def chat(user_message: str) -> str:
-    context_chunks = retrieve(user_message)
-    context = "\n\n".join(context_chunks) if context_chunks else "No relevant documents found."
-
-    system = f"{SYSTEM_PROMPT}\n\n--- CONTEXT ---\n{context}\n--- END CONTEXT ---"
-
-    _conversation.append({"role": "user", "content": user_message})
-    _trim_memory()
-
-    messages = [{"role": "system", "content": system}] + _conversation
-
-    answer = _call_llm(messages)
-    _conversation.append({"role": "assistant", "content": answer})
     return answer
 
 
-def get_stats() -> dict:
+def clear_knowledge_base():
+    """Reset the knowledge base and ALL conversation sessions in Redis."""
+    global _kb
+    _kb = KnowledgeBase()
+    memory.clear_all()
+    log.info("Knowledge base and all conversation sessions cleared")
+
+
+def get_stats(session_id: str) -> dict:
+    """Return a snapshot of the current system state for the UI stats bar."""
+    session_info = memory.get_session_info(session_id)
     return {
-        "chunks": len(_chunks),
-        "indexed": _index is not None,
-        "turns": len(_conversation) // 2,
-        "model": OPENROUTER_MODEL,
+        "chunks":          len(_kb.chunks),
+        "indexed":         _kb.index is not None,
+        "turns":           session_info["turns"],
+        "ttl_seconds":     session_info["ttl_seconds"],
+        "memory_backend":  session_info["backend"],
+        "model":           llm.OPENROUTER_MODEL,
+        "dense_model":     retriever.DENSE_MODEL,
+        "rerank_model":    retriever.RERANK_MODEL,
+        "top_k_retrieve":  retriever.TOP_K_RETRIEVE,
+        "top_k_final":     retriever.TOP_K_FINAL,
+        "hybrid_weights":  {"dense": retriever.DENSE_WEIGHT, "bm25": retriever.BM25_WEIGHT},
     }
